@@ -34,12 +34,14 @@ async def handle_client(reader, writer):
     try:
         data = await reader.read(1024)  # Read incoming binary packet
         if not data:
+            print("No data received.")
             return
 
+        print(f"Received raw data: {data}")  # Log the raw data for debugging
         parsed_data, record_count = parse_codec8_packet(data)
 
         if parsed_data:
-            print(f"Received GPS Data: {parsed_data}")  # Print to terminal
+            print(f"Received GPS Data: {parsed_data}")  # Log parsed data
 
             # Send ACK response (Codec ID + Record Count)
             response = struct.pack(">BB", 0x08, record_count)
