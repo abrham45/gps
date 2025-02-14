@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  gps_listener:
+    build: .
+    container_name: gps_listener
+    ports:
+      - "5055:5055"  # Map container port to host
+    restart: always  # Restart on failure
+    networks:
+      - gps_network
+
+networks:
+  gps_network:
+    driver: bridge
