@@ -1,66 +1,80 @@
 import asyncio
 import struct
+import binascii
 
-def parse_codec8_packet(data):
-    """ Parses Codec 8 binary packet """
+def crc16(data: bytes) -> int:
+    """Calculate CRC-16/IBM checksum."""
+    crc = 0x0000
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x8005
+            else:
+                crc <<= 1
+            crc &= 0xFFFF
+    return crc
+
+def validate_packet(data: bytes) -> bool:
+    """Validate the received packet."""
     if len(data) < 12:
-        return None, None  # Invalid packet
+        print("Packet too short.")
+        return False
 
-    codec_id = data[4]  # Codec ID should be 0x08
-    record_count = data[5]  # Number of records
+    # Validate preamble (4 bytes)
+    if data[:4] != b'\x00\x00\x00\x00':
+        print("Invalid preamble.")
+        return False
 
+    # Validate Codec ID (1 byte)
+    codec_id = data[4]
     if codec_id != 0x08:
-        return None, None  # Invalid codec
+        print(f"Invalid Codec ID: {codec_id}. Expected 0x08.")
+        return False
 
-    # Extract Timestamp (8 bytes)
-    timestamp = struct.unpack(">Q", data[6:14])[0]
+    # Validate CRC-16 (last 2 bytes)
+    received_crc = struct.unpack(">H", data[-2:])[0]
+    calculated_crc = crc16(data[:-2])
+    if received_crc != calculated_crc:
+        print(f"CRC mismatch: received {received_crc}, calculated {calculated_crc}.")
+        return False
 
-    # Extract GPS data
-    latitude = struct.unpack(">i", data[14:18])[0] / 10000000.0
-    longitude = struct.unpack(">i", data[18:22])[0] / 10000000.0
-    speed = struct.unpack(">H", data[22:24])[0]  # Speed in km/h
-
-    parsed_data = {
-        "timestamp": timestamp,
-        "latitude": latitude,
-        "longitude": longitude,
-        "speed": speed
-    }
-
-    return parsed_data, record_count
+    return True
 
 async def handle_client(reader, writer):
-    """ Handles GPS tracker connection """
+    """Handle incoming connections from GPS devices."""
     try:
         data = await reader.read(1024)  # Read incoming binary packet
         if not data:
             print("No data received.")
             return
 
-        print(f"Received raw data: {data}")  # Log the raw data for debugging
-        parsed_data, record_count = parse_codec8_packet(data)
+        if not validate_packet(data):
+            print("Invalid packet received.")
+            return
 
-        if parsed_data:
-            print(f"Received GPS Data: {parsed_data}")  # Log parsed data
+        # Process the valid data here
+        print(f"Received valid data: {data}")
 
-            # Send ACK response (Codec ID + Record Count)
-            response = struct.pack(">BB", 0x08, record_count)
-            writer.write(response)
-            await writer.drain()
+        # Send ACK response (Codec ID + Record Count)
+        record_count = data[5]  # Assuming record count is at index 5
+        response = struct.pack(">BB", 0x08, record_count)
+        writer.write(response)
+        await writer.drain()
 
     except Exception as e:
         print(f"Error: {e}")
 
     finally:
         writer.close()
+        await writer.wait_closed()
 
 async def start_server():
-    """ Starts the AsyncIO TCP Server """
+    """Start the TCP server."""
     server = await asyncio.start_server(handle_client, "0.0.0.0", 5055)
-    print("TCP Server listening on port 5055...")
-
+    print("Server started on port 5055.")
     async with server:
         await server.serve_forever()
 
-# Run the TCP server
-asyncio.run(start_server())
+if __name__ == "__main__":
+    asyncio.run(start_server())
